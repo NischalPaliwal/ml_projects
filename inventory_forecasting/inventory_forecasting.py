@@ -96,6 +96,8 @@ class InventoryForcaster:
             "price_change": 0
         })
 
+        self.df_features = df_features
+
         return df_features
     
     def prepare_ml_data(self, df, target_col="demand"):
@@ -211,6 +213,48 @@ class InventoryForcaster:
         self.models = results
         return results, train_df, test_df
     
+    def forecast_inventory(self, model_name, product_id, forecast_days=30):
+        if model_name not in self.models:
+            raise ValueError(f"Model {model_name} not found. Available models: {list(self.models.keys())}")
+        
+        model = self.models[model_name]['model']
+
+        latest_data = self.df_features.filter(col("product_id") == product_id) \
+                                    .orderBy(desc("date"))  \
+                                    .limit(30)
+        
+        forecasts = []
+
+        for i in range(forecast_days):
+            forecast_date = latest_data.first()['date'] + timedelta(days=i+1)
+
+            forecast_row = latest_data.limit(1).withColumn("date", lit(forecast_date))
+
+            prediction = model.transform(forecast_row)
+            forecast_value = prediction.select("prediction").first()["prediction"]
+
+            forecasts.append({
+                'date': forecast_date,
+                'predicted_demand': max(0, int(forecast_value))  # Ensure non-negative
+            })
+
+        return forecasts
+    
+    def print_model_comparison(self):
+        if not self.models:
+            print("No models trained yet!")
+            return
+        
+        print("\n" + "="*80)
+        print("MODEL PERFORMANCE COMPARISON")
+        print("="*80)
+
+        print(f"{'Model':<20} {'Test RMSE':<12} {'Test R2':<10} {'Test MAE':<10}")
+        print("-" * 60)
+
+        for model_name, results in self.models.items():
+            print(f"{model_name:<20} {results['test_rmse']:<12.2f} {results['test_r2']:<10.3f} {results['test_mae']:<10.2f}")
+
     
 
 def main():
